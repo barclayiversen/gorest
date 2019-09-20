@@ -9,45 +9,25 @@ import (
 	"os"
 	"strings"
 
+	"gorest/driver"
+	"gorest/models"
+
 	"github.com/davecgh/go-spew/spew"
+
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
-	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 )
 
-type User struct {
-	ID       int    `json:"id"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type JWT struct {
-	Token string `json:"token"`
-}
-
-type Error struct {
-	Message string `json:"message"`
-}
-
 var db *sql.DB
 
-func main() {
+func init() {
 	godotenv.Load()
-	pgUrl, err := pq.ParseURL(os.Getenv("POSTGRES_URL"))
-	if err != nil {
-		log.Fatal(err)
-	}
+}
 
-	db, err = sql.Open("postgres", pgUrl)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Println(db)
-	db.Ping()
+func main() {
+	db = driver.ConnectDB()
 
 	router := mux.NewRouter()
 	router.HandleFunc("/signup", signup).Methods("POST")
@@ -58,30 +38,30 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8000", router))
 }
 
-func respondWithError(w http.ResponseWriter, status int, error Error) {
-	w.WriteHeader(http.StatusBadRequest)
+func respondWithError(w http.ResponseWriter, status int, message string) {
+	var error models.Error
+	error.Message = message
+	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(error)
 }
 
 func responseJSON(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
 }
 
 func signup(w http.ResponseWriter, r *http.Request) {
-	var user User
-	var error Error
+	var user models.User
 
 	json.NewDecoder(r.Body).Decode(&user)
 
 	if user.Email == "" {
-		error.Message = "Email is missing"
-		respondWithError(w, http.StatusBadRequest, error)
+		respondWithError(w, http.StatusBadRequest, "Email is missing")
 		return
 	}
 
 	if user.Password == "" {
-		error.Message = "Password is missing"
-		respondWithError(w, http.StatusBadRequest, error)
+		respondWithError(w, http.StatusBadRequest, "Password is missing")
 		return
 	}
 	spew.Dump(user)
@@ -99,8 +79,7 @@ func signup(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow(stmt, user.Email, user.Password).Scan(&user.ID)
 
 	if err != nil {
-		error.Message = "Server error."
-		respondWithError(w, http.StatusInternalServerError, error)
+		respondWithError(w, http.StatusInternalServerError, "Server error.")
 		return
 	}
 
@@ -111,7 +90,7 @@ func signup(w http.ResponseWriter, r *http.Request) {
 	responseJSON(w, user)
 }
 
-func GenerateToken(user User) (string, error) {
+func GenerateToken(user models.User) (string, error) {
 	var err error
 	secret := os.Getenv("JWT_SECRET")
 
@@ -130,21 +109,18 @@ func GenerateToken(user User) (string, error) {
 }
 
 func login(w http.ResponseWriter, r *http.Request) {
-	var user User
-	var jwt JWT
-	var error Error
+	var user models.User
+	var jwt models.JWT
 
 	json.NewDecoder(r.Body).Decode(&user)
 
 	if user.Email == "" {
-		error.Message = "Email is missing"
-		respondWithError(w, http.StatusBadRequest, error)
+		respondWithError(w, http.StatusBadRequest, "Email is missing")
 		return
 	}
 
 	if user.Password == "" {
-		error.Message = "Password is missing"
-		respondWithError(w, http.StatusBadRequest, error)
+		respondWithError(w, http.StatusBadRequest, "Password is missing")
 		return
 	}
 	//Save plaintext password in variable for comparing to hash later
@@ -154,8 +130,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 	err := row.Scan(&user.ID, &user.Email, &user.Password)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			error.Message = "The User does not exist"
-			respondWithError(w, http.StatusBadRequest, error)
+			respondWithError(w, http.StatusBadRequest, "The User does not exist")
 			return
 		} else {
 			log.Fatal(err)
@@ -166,8 +141,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 
 	err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	if err != nil {
-		error.Message = "Invalid Password"
-		respondWithError(w, http.StatusUnauthorized, error)
+		respondWithError(w, http.StatusUnauthorized, "Invalid Password")
 		return
 	}
 
@@ -184,12 +158,13 @@ func login(w http.ResponseWriter, r *http.Request) {
 }
 
 func protectedEndpoint(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("\"yes\""))
 	fmt.Println("protected endpoint invoked")
 }
 
 func TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var errorObject Error
+		var errorObject models.Error
 		authHeader := r.Header.Get("Authorization")
 		bearerToken := strings.Split(authHeader, " ")
 
@@ -206,7 +181,7 @@ func TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 			if error != nil {
 				errorObject.Message = error.Error()
-				respondWithError(w, http.StatusUnauthorized, errorObject)
+				respondWithError(w, http.StatusUnauthorized, error.Error())
 				return
 			}
 
@@ -214,12 +189,12 @@ func TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
 				next.ServeHTTP(w, r)
 			} else {
 				errorObject.Message = error.Error()
-				respondWithError(w, http.StatusUnauthorized, errorObject)
+				respondWithError(w, http.StatusUnauthorized, error.Error())
 				return
 			}
 		} else {
 			errorObject.Message = "Invalid Token"
-			respondWithError(w, http.StatusUnauthorized, errorObject)
+			respondWithError(w, http.StatusUnauthorized, "Invalid Token")
 			return
 		}
 	})
