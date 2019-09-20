@@ -125,11 +125,58 @@ func GenerateToken(user User) (string, error) {
 }
 
 func login(w http.ResponseWriter, r *http.Request) {
-
 	var user User
+	var jwt JWT
+	var error Error
 
-	json.NewDecoder(r.Body).Decode(user)
-	GenerateToken(user)
+	json.NewDecoder(r.Body).Decode(&user)
+
+	if user.Email == "" {
+		error.Message = "Email is missing"
+		respondWithError(w, http.StatusBadRequest, error)
+		return
+	}
+
+	if user.Password == "" {
+		error.Message = "Password is missing"
+		respondWithError(w, http.StatusBadRequest, error)
+		return
+	}
+	//Save plaintext password in variable for comparing to hash later
+	password := user.Password
+
+	row := db.QueryRow("SELECT * FROM users WHERE email = $1", user.Email)
+	err := row.Scan(&user.ID, &user.Email, &user.Password)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			error.Message = "The User does not exist"
+			respondWithError(w, http.StatusBadRequest, error)
+			return
+		} else {
+			log.Fatal(err)
+		}
+	}
+
+	spew.Dump(user)
+
+	hashedPassword := user.Password
+
+	err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	if err != nil {
+		error.Message = "Invalid Password"
+		respondWithError(w, http.StatusUnauthorized, error)
+		return
+	}
+
+	token, err := GenerateToken(user)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	jwt.Token = token
+
 }
 
 func protectedEndpoint(w http.ResponseWriter, r *http.Request) {
