@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dgrijalva/jwt-go"
@@ -111,17 +112,21 @@ func signup(w http.ResponseWriter, r *http.Request) {
 }
 
 func GenerateToken(user User) (string, error) {
-	// var err error
-	// secret := os.Getenv("JWT_SECRET")
+	var err error
+	secret := os.Getenv("JWT_SECRET")
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"email": user.Email,
 		"iss":   "course",
 	})
 
-	spew.Dump(token)
+	tokenString, err := token.SignedString([]byte(secret))
 
-	return "", nil
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return tokenString, nil
 }
 
 func login(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +152,6 @@ func login(w http.ResponseWriter, r *http.Request) {
 
 	row := db.QueryRow("SELECT * FROM users WHERE email = $1", user.Email)
 	err := row.Scan(&user.ID, &user.Email, &user.Password)
-
 	if err != nil {
 		if err == sql.ErrNoRows {
 			error.Message = "The User does not exist"
@@ -157,8 +161,6 @@ func login(w http.ResponseWriter, r *http.Request) {
 			log.Fatal(err)
 		}
 	}
-
-	spew.Dump(user)
 
 	hashedPassword := user.Password
 
@@ -170,12 +172,14 @@ func login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token, err := GenerateToken(user)
+
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	w.WriteHeader(http.StatusOK)
 	jwt.Token = token
+	responseJSON(w, jwt)
 
 }
 
@@ -184,6 +188,39 @@ func protectedEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	fmt.Println("token verify middleware invoked")
-	return nil
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var errorObject Error
+		authHeader := r.Header.Get("Authorization")
+		bearerToken := strings.Split(authHeader, " ")
+
+		if len(bearerToken) == 2 {
+			authToken := bearerToken[1]
+
+			token, error := jwt.Parse(authToken, func(token *jwt.Token) (interface{}, error) {
+				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, fmt.Errorf("There was an error")
+				}
+
+				return []byte(os.Getenv("JWT_SECRET")), nil
+			})
+
+			if error != nil {
+				errorObject.Message = error.Error()
+				respondWithError(w, http.StatusUnauthorized, errorObject)
+				return
+			}
+
+			if token.Valid {
+				next.ServeHTTP(w, r)
+			} else {
+				errorObject.Message = error.Error()
+				respondWithError(w, http.StatusUnauthorized, errorObject)
+				return
+			}
+		} else {
+			errorObject.Message = "Invalid Token"
+			respondWithError(w, http.StatusUnauthorized, errorObject)
+			return
+		}
+	})
 }
