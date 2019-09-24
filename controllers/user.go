@@ -40,9 +40,8 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 
 		user.Password = string(hash)
 
-		stmt := "INSERT INTO USERS (email,password) VALUES ($1, $2) RETURNING id"
-
-		db.QueryRow(stmt, user.Email, user.Password).Scan(&user.ID)
+		userRepo := userRepository.UserRepository{}
+		user = userRepo.Signup(db, user)
 
 		if err != nil {
 			utils.RespondWithError(w, http.StatusInternalServerError, "Server error.")
@@ -63,20 +62,10 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 
 		json.NewDecoder(r.Body).Decode(&user)
 
-		if user.Email == "" {
-			utils.RespondWithError(w, http.StatusBadRequest, "Email is missing")
-			return
-		}
-
-		if user.Password == "" {
-			utils.RespondWithError(w, http.StatusBadRequest, "Password is missing")
-			return
-		}
-		//Save plaintext password in variable for comparing to hash later
 		password := user.Password
 
-		row := db.QueryRow("SELECT * FROM users WHERE email = $1", user.Email)
-		err := row.Scan(&user.ID, &user.Email, &user.Password)
+		userRepo := userRepository.userRepository{}
+		user, err := userRepo.Login(db, user)
 
 		hashedPassword := user.Password
 
