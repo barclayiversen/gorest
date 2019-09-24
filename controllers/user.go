@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"gorest/models"
+
+	//userRepository
+	"gorest/repository/userRepository"
 	"gorest/utils"
 	"log"
 	"net/http"
@@ -64,7 +67,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 
 		password := user.Password
 
-		userRepo := userRepository.userRepository{}
+		userRepo := userRepository.UserRepository{}
 		user, err := userRepo.Login(db, user)
 
 		hashedPassword := user.Password
