@@ -18,6 +18,13 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+func (c Controller) Test() http.HandlerFunc {
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		utils.ResponseJSON(w, "testing")
+	}
+}
+
 func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {

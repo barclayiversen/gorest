@@ -22,6 +22,7 @@ func main() {
 	db = driver.ConnectDB()
 	controller := controllers.Controller{}
 	router := mux.NewRouter()
+	router.HandleFunc("/test", controller.Test()).Methods("GET")
 	router.HandleFunc("/signup", controller.Signup(db)).Methods("POST")
 	router.HandleFunc("/login", controller.Login(db)).Methods("POST")
 	router.HandleFunc("/protected", controller.TokenVerifyMiddleware(controller.ProtectedEndpoint()))
